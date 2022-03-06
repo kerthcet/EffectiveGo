@@ -7,6 +7,7 @@
 - [注释](#注释)
 - [命名](#命名)
 - [分号](#分号)
+- [控制结构](#控制结构)
 
 ## 介绍
 Go 是一门全新的语言。虽然它从其他语言中借鉴了一些思想，但 Go 与众不同的特性，使得它与其他同类型语言在本质上又有不同。将 C++ 或者 Java 程序直译成 Go 语言无法令我们满意，毕竟 Java 程序是使用 Java 语言编写的，而不是 Go 语言。另外，从 Go 语言的角度去思考问题，同样能编写出成功运行但实现却大为不同的代码。换句话说，为了能更把 Go 程序写的更好，掌握它的特性和代码风格是极其重要的。了解 Go 语言命名，格式化，程序构造等既定的规则也同样重要，只有这样，才利于你写出对其他 Go 语言程序员友好的代码。
@@ -196,5 +197,238 @@ if i < f() {
 if i < f()  // wrong!
 {           // wrong!
     g()
+}
+```
+
+## 控制结构
+`Go` 的控制结构和 `C` 很像但也有一些独到之处。`Go` 没有 `do` 和 `while` 控制循环，只有一个简单通用的 `for`；`switch` 结构更加灵活；`if` 和 `switch` 可以和 `for` 循环一样接受一个可选的初始化申明；`break` 和 `continue` 语句用于标记什么时候跳出或者继续循环；另外，`Go` 语言引入了一些新的控制结构，包括类型控制器 `switch`，多路通信选择器 `select`。另外，语法也有一些不同：不使用圆括号，主体必须使用大括号包裹。
+
+### If
+`Go` 中一个简单的 `if` 语句如下：
+```golang
+if x > 0 {
+    return y
+}
+```
+
+强制要求使用的大括号使简单的 `if` 语句分成了多行。尤其是当主体拥有控制语句比如 `return` 和 `break` 时，这种编码风格的好处一看便知。
+
+既然 `if` 和 `switch` 语句接受初始化声明，我们常常通过这种方法初始化本地变量：
+```golang
+if err := file.Chmod(0664); err != nil {
+    log.Print(err)
+    return err
+}
+```
+
+在 `Go` 类库中，如果发现当一个 `if` 语句无法执行到下一步，比如以 `break`，`continue`，`goto` 或者 `return` 结尾的时候，`else` 语句可以忽略。
+```golang
+f, err := os.Open(name)
+if err != nil {
+    return err
+}
+codeUsing(f)
+```
+
+下面是一个使用代码防范一系列错误的常见情形。如果控制流正常，则代码成功运行，避免抛出错误。由于错误一般都会以 `return` 结束，所以后面的代码也就无需使用 `else` 声明了。
+```golang
+f, err := os.Open(name)
+if err != nil {
+    return err
+}
+d, err := f.Stat()
+if err != nil {
+    f.Close()
+    return err
+}
+codeUsing(f, d)
+```
+
+### 重声明和重赋值
+题外话：上一节最后一个示例解释了短声明 `:=` 是如何工作的，调用 `os.Open` 的声明语句为：
+```golang
+f, err := os.Open(name)
+```
+
+该语句声明了两个变量，`f` 和 `err`。后面又调用了 `f.Stat` 语句：
+```golang
+d, err := f.Stat()
+```
+
+看起来我们好像声明了 `d` 和 `err`，但是请注意，`err` 同时出现在了两个声明语句中。这种重复声明是合法的：`err` 由第一个声明语句声明，在第二个语句中只是被重新赋值了。这意味着 `f.Stat` 使用了已经存在的 `err` 变量，只是对它进行了重新赋值。
+
+同时满足下列条件时，已被声明的变量v仍可以被 `:=` 声明：
+
+* 本次声明与已声明的变量v处于同一作用域（若变量v已在外层作用域中声明，本次声明将会创建一个新的变量 §）
+* 初始化声明时赋值给v的值应该与v类型相同
+* 本次声明应该至少有一个变量是新声明的
+
+这个不同寻常的特性非常实用，这让我们很容易的去使用 `err` 变量。例如，在一个很长的 `if-else` 语句中，你会经常看到它。
+
+`§` 在这里根本就没有用，因为在 `Go` 语言中，方法参数，返回值和方法主体的作用域是一致的，尽管他们看起来在主体大括号之外。
+
+### For
+`Go` 的 `for` 循环和 `C` 语言相似但又不尽相同。它整合了 `for` 和 `while` ，但又没有 `do-while` 这种用法。它一共有3种形式，只有一种有分号。
+```golang
+// 像 C 语言的 for
+for init; condition; post { }
+
+// 像 C 语言的 while
+for condition { }
+
+// 像 C 语言的 for(;;)
+for { }
+```
+
+短声明语句让我们方便的在循环中声明索引变量：
+```golang
+sum := 0
+for i := 0; i < 10; i++ {
+    sum += i
+}
+```
+
+如果你想遍历一个数组，切片，字符串或者字典，亦或者从通道中读取数据，`range`  语法可以帮助你：
+```golang
+for key, value := range oldMap {
+    newMap[key] = value
+}
+```
+
+如果你仅需要 `range` 中的第一项（键或者索引），把第二项去掉：
+```golang
+for key := range m {
+    if key.expired() {
+        delete(m, key)
+    }
+}
+```
+
+如果你仅需要 `range` 中的第二项（值），使用空白标识符，即使用下划线来丢弃第一项：
+```golang
+sum := 0
+for _, value := range array {
+    sum += value
+}
+```
+
+空白标识符有很多用途，我们会在后面的段落中讲到。
+
+对字符串来说，`range` 的用途更多，他可以解析 `UTF-8` 将单个 `Unicode` 编码拆分出来。错误的编码将占用一个字节，并以符文 U+FFFD 来代替。（内建类型 `rune` 是 `Go` 中对单个 `Unicode` 码的名称术语。详情见[语言规范](https://go.dev/ref/spec#Rune_literals)）。以下循环语句：
+```golang
+for pos, char := range "日本\x80語" { // \x80 is an illegal UTF-8 encoding
+    fmt.Printf("character %#U starts at byte position %d\n", char, pos)
+}
+```
+
+将会打印：
+```
+character U+65E5 '日' starts at byte position 0
+character U+672C '本' starts at byte position 3
+character U+FFFD '�' starts at byte position 6
+character U+8A9E '語' starts at byte position 7
+```
+
+最后，`Go` 没有逗号操作符，`++` 和 `--` 是声明语句而非表达式，因此如果你想要在 `for` 中声明多个变量，你可以使用平行赋值的方法（但是 `++` 和 `--` 就不能使用了）：
+```golang
+// 反转 a
+for i, j := 0, len(a)-1; i < j; i, j = i+1, j-1 {
+    a[i], a[j] = a[j], a[i]
+}
+```
+
+### Switch
+`Go` 的 `switch` 语句比 `C` 语言更通用。其表达式无需为常量甚至整数，case 语句会自上而下逐一进行求值直到匹配为止。若 `switch` 后面不加表达式，则它将匹配 `true`。所以将一个链状的 `if-else-if-else` 语句用 `switch` 语句来替换是可行也是更符合 `Go` 语言代码风格的。
+```golang
+func unhex(c byte) byte {
+    switch {
+    case '0' <= c && c <= '9':
+        return c - '0'
+    case 'a' <= c && c <= 'f':
+        return c - 'a' + 10
+    case 'A' <= c && c <= 'F':
+        return c - 'A' + 10
+    }
+    return 0
+}
+```
+
+`Switch` 并不会自动下溯，但 `case` 可通过逗号分隔来列举相同的处理条件。
+```golang
+func shouldEscape(c byte) bool {
+    switch c {
+    case ' ', '?', '&', '=', '#', '+', '%':
+        return true
+    }
+    return false
+}
+```
+
+尽管 `Go` 中的语法同其他类 `C` 语言的语法不尽相同，但是在 `Go` 中 `break` 语句可以使 `switch` 语句提前终止。有时候 `switch` 语句被包裹在一个循环体中，我们想要跳出整个循环，在 `Go` 中可以通过在循环体内放置一个标签，然后使用 `break` 语句直接跳到标签处。下面是关于它们如何使用的示例：
+```golang
+Loop:
+	for n := 0; n < len(src); n += size {
+		switch {
+		case src[n] < sizeOne:
+			if validateOnly {
+				break
+			}
+			size = 1
+			update(src[n])
+
+		case src[n] < sizeTwo:
+			if n+1 >= len(src) {
+				err = errShortInput
+				break Loop
+			}
+			if validateOnly {
+				break
+			}
+			size = 2
+			update(src[n] + src[n+1]<<shift)
+		}
+	}
+```
+
+当前， `continue` 语句也接受一个可选标签，但是只能在循环内部使用。
+我们以一个代码程序结束该章节，这段代码展示了使用两个 `switch` 语句对字节切片进行比较：
+```golang
+// Compare 按字典顺序比较两个字节切片并返回一个整数。
+// 若 a == b，则结果为零；若 a < b；则结果为 -1；若 a > b，则结果为 +1。
+func Compare(a, b []byte) int {
+    for i := 0; i < len(a) && i < len(b); i++ {
+        switch {
+        case a[i] > b[i]:
+            return 1
+        case a[i] < b[i]:
+            return -1
+        }
+    }
+    switch {
+    case len(a) > len(b):
+        return 1
+    case len(a) < len(b):
+        return -1
+    }
+    return 0
+}
+```
+
+### Type switch
+`switch` 语句同样可以用来判断一个接口变量的动态类型。**type switch** 将 `type` 关键字放到圆括号中进行类型断言。如果表达式中声明了变量，该变量就会被赋值对应的类型。在 `case` 语句中复用名称是惯用的手法，实际上它会为每一个 `case` 声明一个同名的新变量。
+```golang
+var t interface{}
+t = functionOfSomeType()
+switch t := t.(type) {
+default:
+    fmt.Printf("unexpected type %T\n", t)     // %T prints whatever type t has
+case bool:
+    fmt.Printf("boolean %t\n", t)             // t has type bool
+case int:
+    fmt.Printf("integer %d\n", t)             // t has type int
+case *bool:
+    fmt.Printf("pointer to boolean %t\n", *t) // t has type *bool
+case *int:
+    fmt.Printf("pointer to integer %d\n", *t) // t has type *int
 }
 ```
