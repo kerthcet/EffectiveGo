@@ -8,6 +8,7 @@
 - [命名](#命名)
 - [分号](#分号)
 - [控制结构](#控制结构)
+- [方法](#方法)
 
 ## 介绍
 Go 是一门全新的语言。虽然它从其他语言中借鉴了一些思想，但 Go 与众不同的特性，使得它与其他同类型语言在本质上又有不同。将 C++ 或者 Java 程序直译成 Go 语言无法令我们满意，毕竟 Java 程序是使用 Java 语言编写的，而不是 Go 语言。另外，从 Go 语言的角度去思考问题，同样能编写出成功运行但实现却大为不同的代码。换句话说，为了能更把 Go 程序写的更好，掌握它的特性和代码风格是极其重要的。了解 Go 语言命名，格式化，程序构造等既定的规则也同样重要，只有这样，才利于你写出对其他 Go 语言程序员友好的代码。
@@ -432,3 +433,146 @@ case *int:
     fmt.Printf("pointer to integer %d\n", *t) // t has type *int
 }
 ```
+
+## 方法
+### 多返回值
+`Go` 语言不同于其他语言的特性之一就是函数和方法可以返回多个值。这种形式可以改善在 `C` 语言中一些笨拙的习惯：返回 `in-band` error 比如用 -1 表示 EOF，或者通过传入的参数地址修改对象。
+
+在 `C` 语言中，写入错误通常使用负数的错误码表示，但是错误码可能隐藏在某个角落。而在 `Go` 语言中，`Write` 方法可以同时返回一个计数和一个错误：“是的，您写入了一部分字节但是没有全部写入，因为您的设备已满”。这个 `os` 包的 `Write` 方法签名如下：
+```golang
+func (file *File) Write(b []byte) (n int, err error)
+```
+
+正如文档所述，当 `n != len(b)`，该方法返回写入的字节数和一个非空错误。这也是常见的用法，更多的示例可以参考错误处理这一章节。
+
+我们也可以采用一种类似的方法避免返回一个指针值来指向参数地址。下面是一个在字节切片中根据特定位置获取值的一个简单的方法，结果返回对应的值和下一个位置：
+```golang
+func nextInt(b []byte, i int) (int, int) {
+    for ; i < len(b) && !isDigit(b[i]); i++ {
+    }
+    x := 0
+    for ; i < len(b) && isDigit(b[i]); i++ {
+        x = x*10 + int(b[i]) - '0'
+    }
+    return x, i
+}
+```
+
+你可以使用该方法扫描切片 b 中的数字：
+```golang
+    for i := 0; i < len(b); {
+        x, i = nextInt(b, i)
+        fmt.Println(x)
+    }
+```
+
+### 可命名的结果参数
+`Go` 方法的返回结果参数可以被命名并且可以像普通参数一样使用，就像方法入参一样。一旦使用命名参数，当方法开始执行的时候，他们会被初始化为对应类型的零值；如果该方法执行了不带实参的 `return` 语句，那么结果参数的当前值会被返回。
+
+这个命名不是强制的，但是会让代码显得简短清晰：它们就是文档本身。如果我们命名了 `nextInt` 返回的结果，那么我们就大概理解返回的 `int` 值代表什么意思了。
+```golang
+func nextInt(b []byte, pos int) (value, nextPos int) {
+}
+```
+
+因为被命名的返回值已经初始化过并且绑定到无参数的 `return` 上，整个代码显得简单而又明了。下面的 `io.ReadFull` 很好的展示了这种用法：
+```golang
+func ReadFull(r Reader, buf []byte) (n int, err error) {
+    for len(buf) > 0 && err == nil {
+        var nr int
+        nr, err = r.Read(buf)
+        n += nr
+        buf = buf[nr:]
+    }
+    return
+}
+```
+
+### Defer 语句
+`Go` 的 `defer` 语句用于预定义方法调用（即延迟执行方法），它会在方法返回前即刻调用。这是一个不太常见的但是很有效的方式，尤其是在处理无论方法以何种方式返回都需要进行资源释放等这类场景。一些很典型的示例比如解锁互斥锁或者关闭文件。
+```golang
+// Contents 方法会以字符串形式返回文件内容
+func Contents(filename string) (string, error) {
+    f, err := os.Open(filename)
+    if err != nil {
+        return "", err
+    }
+    defer f.Close()  // 当我们的方法结束后，f.Close 将会执行
+
+    var result []byte
+    buf := make([]byte, 100)
+    for {
+        n, err := f.Read(buf[0:])
+        result = append(result, buf[0:n]...)
+        if err != nil {
+            if err == io.EOF {
+                break
+            }
+            return "", err  // 如果我们在这里返回，文件 f 将会关闭.
+        }
+    }
+    return string(result), nil // 如果我们在这里返回，文件 f 将会关闭.
+}
+```
+
+延迟执行方法比如 `Close` 有两点优势。第一，保证我们绝不会忘记关闭文件，我们常常会在后期为该方法添加新的返回路径时忘了这件事。第二，关闭操作紧邻打开文件操作，这比把它放在方法末尾更显清晰。
+
+延迟方法的参数（如果该方法是函数，同样包括它的接收者）会在 `defer` 语句执行时被求值，而不是被调用时才求值。除此之外我们也不用避免担心方法执行时变量的值会发生变更，这意味着单个延迟调用的代码行可以被用来延迟多个方法的执行。下面是一个仅仅用作示范的例子：
+```golang
+for i := 0; i < 5; i++ {
+    defer fmt.Printf("%d ", i)
+}
+```
+
+延迟执行方法按照后先进出的顺序执行，因此上面的方法会返回 4 3 2 1 0。我们举一个更合理的例子，追踪程序中方法执行的过程。我们可以像这样写一组简单的追踪程序：
+```golang
+func trace(s string)   { fmt.Println("entering:", s) }
+func untrace(s string) { fmt.Println("leaving:", s) }
+
+// 我们可以这样使用
+func a() {
+    trace("a")
+    defer untrace("a")
+    // do something....
+}
+```
+
+我们可以更进一步，利用延迟方法的参数在 `defer` 语句执行时就会被求值这个事实，来完善程序。该例子中，追踪程序会生成反追踪程序的参数：
+```golang
+func trace(s string) string {
+    fmt.Println("entering:", s)
+    return s
+}
+
+func un(s string) {
+    fmt.Println("leaving:", s)
+}
+
+func a() {
+    defer un(trace("a"))
+    fmt.Println("in a")
+}
+
+func b() {
+    defer un(trace("b"))
+    fmt.Println("in b")
+    a()
+}
+
+func main() {
+    b()
+}
+```
+
+打印结果：
+```
+entering: b
+in b
+entering: a
+in a
+leaving: a
+leaving: b
+
+```
+
+对于习惯其他语言中按照块级别进行资源管理的程序员来说，`defer` 语句可能显得有些奇怪，但它最有趣且最强大的地方就在于它是基于函数而不是基于块的。在 `panic` 和 `recover` 节选中，我们会看到它另一种使用场景。
